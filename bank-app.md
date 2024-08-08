@@ -302,7 +302,8 @@ networks:
     - You can solve this with CLI arguments, JVM properties, environment variables, but using these will have their own
       drawbacks:
         1. Error-prone: These involve executing commands and manually setting up the application
-        2. Not scalable: when the number of instances increases, it becomes challenging to handle config for each instance
+        2. Not scalable: when the number of instances increases, it becomes challenging to handle config for each
+           instance
         3. Immutable: if you want to change a property, you need to restart the app
 
 ## Spring Cloud Config
@@ -312,6 +313,48 @@ networks:
     1. **Central repositories**: where properties are stored; can be github repo, database, file
     2. **Spring cloud server**: loads all the configs from central repository
 
-## How to Build a Config Server
-- add `config server` as dependency from spring.io (adding `actuator` might also be beneficial for monitoring later)
-- add `@EnableConfigServer` to your main
+## How to Build a Config Server (retrieves config from GitHub repo)
+
+> [!IMPORTANT]
+> To build config server, previous implementation in spring profiles has been changed
+> 1) accounts -> `application.yml` & `application-prod.yml` & `application-qa.yml` has been moved to bank-config-server
+> 2) The name of the files has been changed to `accounts.yml` & `accounts-prod.yml` & `accounts-qa.yml` respectively
+> 3) Create same folders for loans and cards microservices in bank-app-config-server
+
+1. A repo in GitHub will store our configs, then config server will retrieve these configs
+    - created repo: `https://github.com/egedemirtas/bank-app-config`
+    - Notice that this repo only has the environment-specific yml files
+2. Create a maven project for your config server:
+    - add `config server` as dependency from `spring.io` (adding `actuator` might also be beneficial for monitoring
+      later)
+    - add `@EnableConfigServer` to your main
+    - inside `application.yml` add properties to retrieve data from config repo(created in step 1)
+    - Test config server quickly with `http://localhost:8071/accounts/prod` (you should see the configs are retrieved 
+      from GitHub repo)
+3. Create Dto classes inside each microservice (Ex: `AccountsContactInfoDto`) and create and endpoint inside controller
+   classes to retrieve configs:
+   `AccountController.getAccountInfo`, `LoanController.getLoanInfo`, `CardController.getCardInfo`
+    - Remember to add `@EnableConfigurationProperties(value = {myBean.class})` to your main
+4. For each ms, change `application.yml` to retrieve configs from config server:
+    ```yaml
+    spring:
+      application:
+        name: "accounts" # tell ms to look for config files starting with "accounts"
+      profiles:
+        active: qa
+      config:
+      # "configserver" is used no matter what your config server name is or its repo name
+        import: "optional:configserver:http://localhost:8071"
+    ```
+5. Add `config client` dependency to each ms inside `pom.xml`
+
+## How to Encrypt Configs?
+1. Add an encryption key to your config-server yml:
+    ```yml
+    encrypt:
+      key: "thisIsAStrongPassword"
+    ```
+2. Send the plain text as `POST` to your config server with body in raw text (not JSON !!): `http://localhost:8071/encrypt`
+3. Config server will get your plain text, cipher it with the key in the yml file and return it as a response
+4. You can now go to your config repo and paste cipher text in this format: **"{cipher}cipherText"**
+- You can see the example in bank-app-config -> accounts-prod.yml
