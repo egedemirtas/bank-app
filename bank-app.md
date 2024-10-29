@@ -189,7 +189,7 @@ ENTRYPOINT ["java", "-jar", "accounts-0.0.1-SNAPSHOT.jar"]
 </plugin>
 ```
 
-- build image `mvn compile jib:dcokerBuild`
+- build image `mvn compile jib:dockerBuild`
 - Run image `docker run -d -p 9000:9000 rarewind/bank-cards:v1`
 
 ## Push Images to DockerHub
@@ -329,7 +329,7 @@ networks:
       later)
     - add `@EnableConfigServer` to your main
     - inside `application.yml` add properties to retrieve data from config repo(created in step 1)
-    - Test config server quickly with `http://localhost:8071/accounts/prod` (you should see the configs are retrieved 
+    - Test config server quickly with `http://localhost:8071/accounts/prod` (you should see the configs are retrieved
       from GitHub repo)
 3. Create Dto classes inside each microservice (Ex: `AccountsContactInfoDto`) and create and endpoint inside controller
    classes to retrieve configs:
@@ -349,12 +349,255 @@ networks:
 5. Add `config client` dependency to each ms inside `pom.xml`
 
 ## How to Encrypt Configs?
+
 1. Add an encryption key to your config-server yml:
     ```yml
     encrypt:
       key: "thisIsAStrongPassword"
     ```
-2. Send the plain text as `POST` to your config server with body in raw text (not JSON !!): `http://localhost:8071/encrypt`
+2. Send the plain text as `POST` to your config server with body in raw text (not
+   JSON !!): `http://localhost:8071/encrypt`
 3. Config server will get your plain text, cipher it with the key in the yml file and return it as a response
 4. You can now go to your config repo and paste cipher text in this format: **"{cipher}cipherText"**
+
 - You can see the example in bank-app-config -> accounts-prod.yml
+
+## How to Update Configs at Runtime?
+
+- For all the classes that use configs for setting its fields:
+    - These classes cannot be `record` or have immutable(`final static`) fields
+    - This means that our previous implementation of `AccountsContactInfoDto`, `CardsContactInfoDto`,
+      `LoansContactInfoDto` will change, the fields should be `private` with getters and setters
+
+### Using Actuator
+
+1. You need to have `actuator` dependency in your microservices
+2. Add this to your microservices that use configs:
+   ```yml
+    management:
+        endpoints:
+            web:
+                exposure:
+                    include: "*" # this enables and exposes all the endpoints supported by actuator,
+                    # include: "refresh"  # you can also specify only the refresh endpoint
+    ```
+3. Now that all actuator api is exposed, you can see all the endpoints.
+   At this point when you change a config in **config repo**, changes will be reflected to
+   **config-server**(`http://localhost:8071/accounts/prod`) but not to the main microservices
+4. **Refresh** endpoint at the actuator should be accessed with POST with empty body.
+   `http://localhost:8080/actuator/refresh` will refresh the configs for Accounts microservice.
+   The response will include the changed configs and also `config.client.version` because the version is upgraded
+   everytime a config is changed
+5. After you call refresh, microservices can now get the latest config
+
+> [!IMPORTANT]
+> This approach requires to call `/actuator/refresh` endpoint everytime a config is updated. CI/CD can automate this
+> with scripts or other approaches can be tried
+
+### Using Spring Cloud Bus
+
+What is ***Spring Cloud Bus***?
+
+- Spring Cloud Bus links nodes of a distributed system with a lightweight message
+  broker.
+- This can then be used to broadcast state changes (e.g., configuration changes) or other management instructions.
+- AMQP and Kafka broker implementations are included with the project
+
+1. For this demo `RabbitMQ`'s Docker image is used rather than installing with Brew
+    ```bash
+   docker run -it --rm --name rabbitmq -p 5672:5672 -p 15672:15672 rabbitmq:3.13-management
+    ```
+2. Spring Cloud Bus and RabbitMQ dependencies have to be added to all microservices (config server included):
+    ```xml
+   	<dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-starter-bus-amqp</artifactId>
+    </dependency>
+    ```
+3. You need to expose the bus refresh path in each microservice yml file (all the endpoints are already exposed in the
+   previous section, see `Using Actuator`)
+4. Provide RabbitMQ connection details for each microservice:
+    ```yml
+    spring:
+      rabbitmq:
+        host: "localhost"
+        port: 5672
+        username: "guest"
+        password: "guest"
+    ```
+    - ***These are default values, RabbitMQ connection will still be achieved even if these default settings are not
+      written***
+
+> [!IMPORTANT]
+> Bus refresh api path has to be invoked once for each microservice.
+> All the instances of such a microservice will be able to retrieve the updated configs at runtime
+
+### Using Spring Cloud Bus & Spring Cloud Config Monitor
+
+1. The dependencies in previous implementation should exist (RabbitMQ & Spring cloud bus).
+   Additionally, add this to your config-server:
+    ```xml
+    <dependency>
+        <groupId>org.springframework.cloud</groupId>
+        <artifactId>spring-cloud-config-monitor</artifactId>
+    </dependency>
+    ```
+2. This implementation does not use actuator paths.
+   It uses monitor API paths (this has to be exposed just like actuator paths).
+   Thus add this to the config-server `application.yml`
+    ```yml
+    spring:
+      rabbitmq:
+      host: "localhost"
+      port: 5672
+      username: "guest"
+      password: "guest"
+    
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: "*"
+    ```
+3. This implementation uses a webhook.
+   Whenever a change occurs in config repo, the monitor API path will be invoked inside config-server.
+   As soon as the monitor API path receives the webhook request, it is going to invoke refresh event with RabbitMQ and
+   spring cloud bus; all the connected microservices will receive the latest configs.
+   To create a webhook in your
+   **config-repo**:
+    1. Go to GitHub->config-repo. Click Settings
+    2. Webhook-> create new webhook
+    3. This new webhook will publish an event whenever a change is pushed in this repo.
+   ```txt
+   Payload URL: http://localhost:8071/monitor (where the webhook request should be sent)
+   Content type: JSON
+   ```
+   > [!IMPORTANT]
+   > Notice that in our example payload URL is configured as "localhost"
+   > It is impossible for GitHub to target our local system.
+   > `https://console.hookdeck.com/` provides a solution for this.
+   > ```bash
+   >  brew install hookdeck/hookdeck/hookdeck
+   >  hookdeck listen 8071 source --cli-path /monitor  (use config-server port and motinor API path)
+   >  ```
+   > This command will provide us the Payload URL that we can use instead of
+   localhost: `https://hkdk.events/lu1xs6cuwfdhes`
+
+### Updating Docker Compose File to Adapt Config Server Changes
+
+- The main strategy is to use different docker-compose files for different environments.
+  We already had a docker-compose file in `bank-app` and we will make adjustments on this file for default, QA and PROD.
+
+1. Add config-server to docker-compose
+    1. This is very similar to every other service declaration we did such as accounts, loans and cards in
+       docker-compose
+    2. We used these statements in our services' `application.yml`:
+        ```yml
+        config:
+          import: "optional:configserver:http://localhost:8071"
+        ```
+        - We need to change `localhost` because our services will try to connect to config-server within it's own
+          network
+        - For each service that will use config-server, we need to this update in docker-compose:
+          ```yml
+          accounts: # do this for loans and cards
+            environment:
+              #configserver:http://{{config-server-docker-name}}:{{port-of-config-server-inside-docker-network}}
+              SPRING_CONFIG_IMPORT: "configserver:http://config-server:8071" 
+          ```
+2. Add the profile you want to use for config-server. Ex:
+    ```yml
+    accounts: # do this for loans and cards
+      environment:
+        SPRING_CONFIG_IMPORT: "configserver:http://config-server:8071" 
+        SPRING_PROFILES_ACTIVE: default # can be prod or QA as well
+    ```
+3. Force config-server to be started before other microservices
+
+   > [!IMPORTANT]
+   > ***Liveness and Readiness Probes***
+   > container orchestration products like `Kubernetes` will handle elasticity and scaling.
+   > To handle containers effectively, Kubernetes need to know whether my container is running without any issues.
+   > Liveness probe: used to signal that container is alive or dead, Kubernetes will take action if container is dead
+   > Readiness probe: used to signal that container is ready to start network traffic
+
+   > [!IMPORTANT]
+   > In spring boot, actuator gathers liveness and readiness info from `ApplicationAvailability`
+   > This info is used in dedicated health indicators: LivenessStateHealthIndicator & ReadinessStateHealthIndicator
+   > These indicators are shown in the global health endpoint: `/actuator/health/liveness`
+
+    1. For these reasons you need to have `spring-boot-starter-actuator` dependency in config-server and you need to
+       expose health info:
+       ```yml
+       management:
+         readiness-state:
+           enabled: true
+         liveness-state:
+           enabled: true
+       endpoint:
+         health:
+           probes:
+             enabled: true
+       ```
+        - Test with `http://localhost:8071/actuator/health`, `http://localhost:8071/actuator/health/liveness`,
+          `http://localhost:8071/actuator/health/readiness`
+    2. Now we need to mention these in our docker-compose, so that Kubernetes can understand:
+         ```yml
+         config-server:
+           healthcheck:
+             test: "curl --fail --silent localhost:8071/actuator/health/readiness | grep UP || exit 1"
+             interval: 10s # if command failed: retry after 10s
+             timeout: 5s # wait for response up-to 5s
+             retries: 10 # if command failed: retry up-to 10 times
+             start_period: 10s # run the health check command after 10s
+         ```
+    3. Add config-server as a dependency to accounts, loans and cards in docker-compose:
+       ```yml 
+       accounts:
+         depends_on:
+           config-server:
+             condition: service_healthy
+       ```
+    4. Since we use spring cloud bus, all of our services depend on rabbitMQ, we need to add rabbitMQ in docker-compose:
+       ```yml 
+       rabbit:
+         image: rabbitmq:3.12-management
+         host-name: rabbitmq # specific to rabbitMQ
+         ports:
+           - "5672:5672" # for activities
+           - "15672:15672" # for management
+         healthcheck:
+           test: rabbitmq-diagnostics check_port_connectivity
+           interval: 10s
+           timeout: 5s
+           retries: 10
+           start_period: 5s
+         networks:
+           - bank-network
+       ```
+    5. Add rabbitMQ as a dependency to **only** config-server: (we need rabbitMQ for accounts/loans/cards as well
+       but since compose flow will be rabbit->config->other services we don't need to explicitly define rabbit
+       dependency in other services)
+        ```yml
+        depends_on:
+          rabbit:
+            condition: service_healthy
+        ```
+    6. Inside all our microservices, in `application.yml` we defined RabbitMQ connection details. The `host` part
+       must be overridden so that our microservices won't target localhost. The other parts such as `port`,
+       `username`, `password` ***may not be overridden in our case*** since these are default values for RabbitMQ
+       connection.
+        ```yml
+        environment:
+          SPRING_RABBITMQ_HOST: rabbit
+        ```
+
+___ 
+
+# Optimizing Docker
+
+- Some fields such as `network` are repeated in docker-compose, we need to optimize this by declaring them from one
+  place.
+  This will also enable us to make a change to a field in docker compose and affect all services that use it
+- Created files and latest form of docker-compose can be found in `bank-app.docker-compose.prod`. Simply put common
+  services are created in `common-config` and these are used with `extends` in docker-compose
