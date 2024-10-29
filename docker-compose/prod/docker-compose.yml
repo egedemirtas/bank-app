@@ -1,0 +1,64 @@
+services:
+  rabbit:
+    image: rabbitmq:3.13-management
+    ports:
+      - "5672:5672" # for activities
+      - "15672:15672" # for management
+    healthcheck:
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    extends:
+      file: common-config.yml
+      service: network-deploy-service
+
+  configserver:
+    image: rarewind/bank-configserver:v3
+    container_name: bank-configserver-ms-prod
+    ports:
+      - "8071:8071"
+    healthcheck:
+      test: "curl --fail --silent localhost:8071/actuator/health/readiness | grep UP || exit 1"
+      interval: 10s # if command failed: retry after 10s
+      timeout: 5s # wait for response up-to 5s
+      retries: 10 # if command failed: retry up-to 10 times
+      start_period: 10s # run the health check command after 10s
+    depends_on:
+      rabbit:
+        condition: service_healthy
+    extends:
+      file: common-config.yml
+      service: microservice-base-config
+
+  accounts:
+    image: rarewind/bank-accounts:v3
+    container_name: bank-accounts-ms-prod
+    ports:
+      - "8080:8080"
+    extends:
+      file: common-config.yml
+      service: microservice-configserver-config
+
+  cards:
+    image: rarewind/bank-cards:v3
+    container_name: bank-cards-ms-prod
+    ports:
+      - "9000:9000"
+    extends:
+      file: common-config.yml
+      service: microservice-configserver-config
+
+  loans:
+    image: rarewind/bank-loans:v3
+    container_name: bank-loans-ms-prod
+    ports:
+      - "8090:8090"
+    extends:
+      file: common-config.yml
+      service: microservice-configserver-config
+
+networks:
+  bank-network:
+    driver: "bridge"
