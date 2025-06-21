@@ -472,16 +472,16 @@ What is ***Spring Cloud Bus***?
    Payload URL: http://localhost:8071/monitor (where the webhook request should be sent)
    Content type: JSON
    ```
-   > [!IMPORTANT]
-   > Notice that in our example payload URL is configured as "localhost"
-   > It is impossible for GitHub to target our local system.
-   > `https://console.hookdeck.com/` provides a solution for this.
-   > ```bash
-   >  brew install hookdeck/hookdeck/hookdeck
-   >  hookdeck listen 8071 source --cli-path /monitor  (use config-server port and motinor API path)
-   >  ```
-   > This command will provide us the Payload URL that we can use instead of
-   localhost: `https://hkdk.events/lu1xs6cuwfdhes`
+> [!IMPORTANT]
+> Notice that in our example payload URL is configured as "localhost"
+> It is impossible for GitHub to target our local system.
+> `https://console.hookdeck.com/` provides a solution for this.
+> ```bash
+>  brew install hookdeck/hookdeck/hookdeck
+>  hookdeck listen 8071 source --cli-path /monitor  (use config-server port and motinor API path)
+>  ```
+> This command will provide us the Payload URL that we can use instead of
+localhost: `https://hkdk.events/lu1xs6cuwfdhes`
 
 ### Updating Docker Compose File to Adapt Config Server Changes
 
@@ -514,83 +514,83 @@ What is ***Spring Cloud Bus***?
     ```
 3. Force config-server to be started before other microservices
 
-   > [!IMPORTANT]
-   > ***Liveness and Readiness Probes***
-   > container orchestration products like `Kubernetes` will handle elasticity and scaling.
-   > To handle containers effectively, Kubernetes need to know whether my container is running without any issues.
-   > Liveness probe: used to signal that container is alive or dead, Kubernetes will take action if container is dead
-   > Readiness probe: used to signal that container is ready to start network traffic
+> [!IMPORTANT]
+> ***Liveness and Readiness Probes***
+> container orchestration products like `Kubernetes` will handle elasticity and scaling.
+> To handle containers effectively, Kubernetes need to know whether my container is running without any issues.
+> Liveness probe: used to signal that container is alive or dead, Kubernetes will take action if container is dead
+> Readiness probe: used to signal that container is ready to start network traffic
 
-   > [!IMPORTANT]
-   > In spring boot, actuator gathers liveness and readiness info from `ApplicationAvailability`
-   > This info is used in dedicated health indicators: LivenessStateHealthIndicator & ReadinessStateHealthIndicator
-   > These indicators are shown in the global health endpoint: `/actuator/health/liveness`
+> [!IMPORTANT]
+> In spring boot, actuator gathers liveness and readiness info from `ApplicationAvailability`
+> This info is used in dedicated health indicators: LivenessStateHealthIndicator & ReadinessStateHealthIndicator
+> These indicators are shown in the global health endpoint: `/actuator/health/liveness`
 
-    1. For these reasons you need to have `spring-boot-starter-actuator` dependency in config-server and you need to
-       expose health info:
-       ```yml
-       management:
-         readiness-state:
-           enabled: true
-         liveness-state:
-           enabled: true
-       endpoint:
-         health:
-           probes:
-             enabled: true
-       ```
-        - Test with `http://localhost:8071/actuator/health`, `http://localhost:8071/actuator/health/liveness`,
-          `http://localhost:8071/actuator/health/readiness`
-    2. Now we need to mention these in our docker-compose, so that Kubernetes can understand:
-         ```yml
-         config-server:
-           healthcheck:
-             test: "curl --fail --silent localhost:8071/actuator/health/readiness | grep UP || exit 1"
-             interval: 10s # if command failed: retry after 10s
-             timeout: 5s # wait for response up-to 5s
-             retries: 10 # if command failed: retry up-to 10 times
-             start_period: 10s # run the health check command after 10s
-         ```
-    3. Add config-server as a dependency to accounts, loans and cards in docker-compose:
-       ```yml 
-       accounts:
-         depends_on:
-           config-server:
-             condition: service_healthy
-       ```
-    4. Since we use spring cloud bus, all of our services depend on rabbitMQ, we need to add rabbitMQ in docker-compose:
-       ```yml 
-       rabbit:
-         image: rabbitmq:3.12-management
-         host-name: rabbitmq # specific to rabbitMQ
-         ports:
-           - "5672:5672" # for activities
-           - "15672:15672" # for management
-         healthcheck:
-           test: rabbitmq-diagnostics check_port_connectivity
-           interval: 10s
-           timeout: 5s
-           retries: 10
-           start_period: 5s
-         networks:
-           - bank-network
-       ```
-    5. Add rabbitMQ as a dependency to **only** config-server: (we need rabbitMQ for accounts/loans/cards as well
-       but since compose flow will be rabbit->config->other services we don't need to explicitly define rabbit
-       dependency in other services)
-        ```yml
-        depends_on:
-          rabbit:
-            condition: service_healthy
-        ```
-    6. Inside all our microservices, in `application.yml` we defined RabbitMQ connection details. The `host` part
-       must be overridden so that our microservices won't target localhost. The other parts such as `port`,
-       `username`, `password` ***may not be overridden in our case*** since these are default values for RabbitMQ
-       connection.
-        ```yml
-        environment:
-          SPRING_RABBITMQ_HOST: rabbit
-        ```
+1. For these reasons you need to have `spring-boot-starter-actuator` dependency in config-server and you need to
+   expose health info:
+   ```yml
+   management:
+     readiness-state:
+       enabled: true
+     liveness-state:
+       enabled: true
+   endpoint:
+     health:
+       probes:
+         enabled: true
+   ```
+    - Test with `http://localhost:8071/actuator/health`, `http://localhost:8071/actuator/health/liveness`,
+      `http://localhost:8071/actuator/health/readiness`
+2. Now we need to mention these in our docker-compose, so that Kubernetes can understand:
+     ```yml
+     config-server:
+       healthcheck:
+         test: "curl --fail --silent localhost:8071/actuator/health/readiness | grep UP || exit 1"
+         interval: 10s # if command failed: retry after 10s
+         timeout: 5s # wait for response up-to 5s
+         retries: 10 # if command failed: retry up-to 10 times
+         start_period: 10s # run the health check command after 10s
+     ```
+3. Add config-server as a dependency to accounts, loans and cards in docker-compose:
+   ```yml 
+   accounts:
+     depends_on:
+       config-server:
+         condition: service_healthy
+   ```
+4. Since we use spring cloud bus, all of our services depend on rabbitMQ, we need to add rabbitMQ in docker-compose:
+   ```yml 
+   rabbit:
+     image: rabbitmq:3.12-management
+     host-name: rabbitmq # specific to rabbitMQ
+     ports:
+       - "5672:5672" # for activities
+       - "15672:15672" # for management
+     healthcheck:
+       test: rabbitmq-diagnostics check_port_connectivity
+       interval: 10s
+       timeout: 5s
+       retries: 10
+       start_period: 5s
+     networks:
+       - bank-network
+   ```
+5. Add rabbitMQ as a dependency to **only** config-server: (we need rabbitMQ for accounts/loans/cards as well
+   but since compose flow will be rabbit->config->other services we don't need to explicitly define rabbit
+   dependency in other services)
+    ```yml
+    depends_on:
+      rabbit:
+        condition: service_healthy
+    ```
+6. Inside all our microservices, in `application.yml` we defined RabbitMQ connection details. The `host` part
+   must be overridden so that our microservices won't target localhost. The other parts such as `port`,
+   `username`, `password` ***may not be overridden in our case*** since these are default values for RabbitMQ
+   connection.
+    ```yml
+    environment:
+      SPRING_RABBITMQ_HOST: rabbit
+    ```
 
 ___ 
 
@@ -601,3 +601,69 @@ ___
   This will also enable us to make a change to a field in docker compose and affect all services that use it
 - Created files and latest form of docker-compose can be found in `bank-app.docker-compose.prod`. Simply put common
   services are created in `common-config` and these are used with `extends` in docker-compose
+
+---
+
+# H2 to MySQL
+
+- It was advised to delete config related dependencies and also rabbitMQ since running multiple 
+  containers may slow down the system. (I opted out)
+- Each microservice has its own DB
+
+1) Delete H2 database dependency from cards, accounts and loans and add mysql dependency to `pom.xml`:
+    ```xml
+    <dependency>
+        <groupId>com.mysql</groupId>
+        <artifactId>mysql-connector-j</artifactId>
+        <scope>runtime</scope>
+    </dependency>
+    ```
+2) You need to add each DB config to `docker-compose.yml` as such
+    ```yml
+    accountsDB:
+      image: mysql
+      container_name: accountsDB
+      ports:
+        - 3306:3306
+      healthcheck:
+        test: [ "CMD", "mysqladmin" ,"ping", "-h", "localhost" ]
+        interval: 10s
+        timeout: 10s
+        retries: 10
+        start_period: 10s
+      environment:  
+        MYSQL_ROOT_PASSWORD: root # we are assigning a password to the MySQL DB while it is being setup as a container.
+        MYSQL_DATABASE: accountsDB 
+      extends:
+        file: common-config.yml
+        service: network-deploy-service
+    ```
+3) Since SpringBoot application has to connect with the DB during the startup, we are providing the MySQL password 
+   using the `SPRING_DATASOURCE_PASSWORD` in `common-config.yml`
+    - We choose to add `SPRING_DATASOURCE_PASSWORD` under `microservice-configserver-config.environment` since all 
+      the microservices extend from `microservice-configserver-config`.
+   ```yml
+   SPRING_DATASOURCE_USERNAME: root
+   SPRING_DATASOURCE_PASSWORD: root
+   ```
+4) Add database url as an environment variable in `docker-compose.yml` for accounts, loans, cards:
+    ```yml
+    environment:
+      SPRING_DATASOURCE_URL: "jdbc:mysql://accountsDB:3306/accountsDB"
+    ```
+5) Add `depends_on` for DB get ready before microservices in `docker-compose.yml` for accounts, loans, cards:
+    ```yml
+    depends_on:
+      accountsDB:
+        condition: service_healthy
+    ```
+6) You no longer need db source specified in `bank-app-config`/`accounts.yml` etc
+7) Update accounts, cards, loans to v4 in `pom.xml` (we can exclude config server since no changes are made)
+8) `mvn clean install`
+9) Build new images with google jib `mvn compile jib:dockerBuild`
+10) Update docker compose to use v4
+11) run docker compose 
+12) View records changes in SQL workbench. Notice that MySQL workbench only acts as a UI, the real data is stored in 
+    the docker 
+    containers
+13) **BONUS**: you can move `healthcheck` and `MYSQL_ROOT_PASSWORD` to `common-config.yml`
