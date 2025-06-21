@@ -667,3 +667,9 @@ ___
     the docker 
     containers
 13) **BONUS**: you can move `healthcheck` and `MYSQL_ROOT_PASSWORD` to `common-config.yml`
+
+> [!IMPORTANT]
+> Notice that ports for all `SPRING_DATASOURCE_URL` have the same port=3306, why didn't we assign 3307 to loans and 
+> 3308 to cards? It is because accounts/cards/loans containers are within the same network, they are not trying to 
+> reach DBs from an outside world. Thus, if you want to connect to any DN with MySQL Workbench, you need to use 3306,
+> 3307 and 3308 for accountsDB, loansDB and cardsDB respectively.
